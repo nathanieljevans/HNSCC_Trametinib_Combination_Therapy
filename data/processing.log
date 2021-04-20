@@ -1,0 +1,33 @@
+Log output for processing of: lab_id=20003-norm=blank490-plate_version_id=OHSU_HNSCC_derm004-note=Combo Plate.xlsx 
+ #################### 
+path ./../plate-data/lab_id=20003-norm=blank490-plate_version_id=OHSU_HNSCC_derm004-note=Combo Plate.xlsx
+---------------------------------------------------------
+please double check file name parsing is accurate
+file name: lab_id=20003-norm=blank490-plate_version_id=OHSU_HNSCC_derm004-note=Combo Plate.xlsx
+lab_id: 20003
+norm: blank490
+version_id: OHSU_HNSCC_derm004
+notes: Combo Plate
+---------------------------------------------------------
+
+--------------------------------------------------------------------------
+This is the message log for: 
+	lab_id: 20003
+	version_id: OHSU_HNSCC_derm004
+	notes: Combo Plate
+--------------------------------------------------------------------------
+Data has already been normalized by positive controls: True
+This assay has 4 plates
+mapping data... [OHSU_HNSCC_derm004]
+mapping complete. 
+	 mapped data shape: (1536, 11)
+	 column names: [['lab_id', 'norm_type', 'plate_num', 'plate_row', 'assay_version_id', 'note', 'plate_col', 'optical_density', 'conc', 'inhibitor', 'map_version_id']]
+normalizing cell viability by negative controls...
+plate average controls: 
+                PAC
+plate_num          
+1          0.601000
+2          0.594833
+3          0.506500
+4          0.589333
+Applying a ceiling of 1 to cell viability...
