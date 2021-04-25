@@ -5,8 +5,11 @@ import matplotlib.pyplot as plt
 import torch
 
 import pyro
+from pyro.infer.mcmc.hmc import HMC
 import pyro.contrib.gp as gp
 import pyro.distributions as dist
+from pyro.infer.mcmc import MCMC
+
 
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
@@ -27,16 +30,17 @@ class DrugCombinationGP:
         X should be a 2D torch tensor ~ drug A,B concentrations 
         y should be a 1d torch tensor ~ measured cell viability ~[0,1]
         '''
+        
         self.X = X
         self.y = y
 
         kernel = gp.kernels.RBF(input_dim=2, variance=torch.tensor([5.]),
                         lengthscale=torch.tensor([10.]))
-        gpr = gp.models.GPRegression(X, y, kernel, noise=torch.tensor(0.5))
+        gpr = gp.models.GPRegression(X, y, kernel, noise=torch.tensor(1.))
 
         # note that our priors have support on the positive reals
-        gpr.kernel.lengthscale = pyro.nn.PyroSample(dist.LogNormal(0.0, 2.0))
-        gpr.kernel.variance = pyro.nn.PyroSample(dist.LogNormal(0.0, 2.0))
+        gpr.kernel.lengthscale = pyro.nn.PyroSample(dist.LogNormal(0.5, 1.5))
+        gpr.kernel.variance = pyro.nn.PyroSample(dist.LogNormal(1, 3.0))
 
         optimizer = torch.optim.Adam(gpr.parameters(), lr=learning_rate)
         loss_fn = pyro.infer.Trace_ELBO().differentiable_loss
@@ -53,7 +57,7 @@ class DrugCombinationGP:
 
         self.gpr = gpr
 
-    def sample(self, X, n, include_liklihood=False): 
+    def sample(self, X, n, include_liklihood=True): 
         '''
         X (N, 2) Numpy array
         n <int> number of samples to return

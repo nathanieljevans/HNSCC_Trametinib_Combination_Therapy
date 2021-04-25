@@ -21,9 +21,9 @@ class HillModel(torch.nn.Module):
         self.Emax.data.normal_(0.0, 0.25)
         if verbose: print('Emax init', self.Emax.detach().numpy())
         
-        self.E0 = torch.nn.Parameter(torch.FloatTensor([1.]))
-        self.E0.data.normal_(1., 0.25) 
-        if verbose: print('E0 init', self.E0.detach().numpy())
+        self.E0 = 1 #torch.nn.Parameter(torch.FloatTensor([1.]))
+        #self.E0.data.normal_(1., 0.25) 
+        if verbose: print('E0 init', self.E0)
         
         self.EC50 = torch.nn.Parameter(torch.FloatTensor([0.01]))
         #self.EC50.data.uniform_(0., 10.)
@@ -87,10 +87,10 @@ class HillModel(torch.nn.Module):
         plt.plot(np.log10(X), Y, 'b--', label='fit')
         
         try: 
-            IC = self.get_IC(ICxx)
+            IC, eq = self.get_IC(ICxx)
+            print('plot fit, (um) ICxx =', IC)
             plt.axvline(np.log10(IC), c='g', label=f'log IC{ICxx} [{IC:.3f}]')
         except: 
-            print('here')
             raise
         
         plt.xlim(-8,2)
@@ -105,7 +105,7 @@ class HillModel(torch.nn.Module):
         print( '| PARAMETER | VALUE |')
         print( '|-----------|-------|')
         print(f'|  Emax     |{self.Emax.detach().numpy()[0]:.5f}|')
-        print(f'|  E0       |{self.E0.detach().numpy()[0]:.5f}|')
+        print(f'|  E0       |{self.E0:.5f}|')
         print(f'|  EC50     |{self.EC50.detach().numpy()[0]:.5f}|')
         print(f'|  H        |{self.H.detach().numpy()[0]:.5f}|')
         
@@ -115,16 +115,21 @@ class HillModel(torch.nn.Module):
         '''
         XX = XX / 100
         
-        x = np.logspace(-7,2,1000)
+        assert (XX > 0) & (XX < 1), 'IC value is outside of 0,1'
+        
+        _min = np.log10( self.fitX.min() )
+        _max = np.log10( self.fitX.max() )
+        
+        x = np.logspace(_min,_max,5000)
         y = self.predict(x)
         
         a = np.abs(y - XX)
-        
+
         if min(a) > diff: 
-            return 10
+            return self.fitX.max(), 'greater_than'
             #print('min a', min(a)) 
             #raise ValueError('ICxx can not be calculated') 
         else: 
             ICxx = x[a == min(a)][0]
-            return ICxx         
+            return ICxx, 'equal_to'         
         

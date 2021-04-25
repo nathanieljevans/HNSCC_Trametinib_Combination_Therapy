@@ -38,25 +38,25 @@ def _get_ICxx(x, y, IC_value):
 
     # Hill Regression
     model = HillModel(verbose=False)
-    model.fit(10**x, y, epochs=10000, learningRate=1e-4, plot=False)
+    model.fit(10**x, y, epochs=15000, learningRate=1e-4, plot=False)
 
-    ICxx = model.get_IC(IC_value*100)
+    ICxx, eq = model.get_IC(IC_value*100)
     
     # Hill Model returns ICxx in uM, Logistic returns it in logspace
     ICxx = np.log10(ICxx)
     
-    return ICxx
+    return ICxx, eq
 
-def get_CI(dataA, dataB, dataAB, IC_value, margin=0., num_meshgrid_samples=100): 
+def get_CI(dataA, dataB, dataAB, IC_value, margin=0.0, num_meshgrid_samples=100, allowed_ic_delta = 0.0015): 
     
     # fit 1D (single agents) dose-response data 
     x_A = np.log10(dataA.conc.values.astype(np.float))
     y_A = dataA.cell_viab.values 
-    ICxxA = _get_ICxx(x_A, y_A, IC_value=IC_value) 
+    ICxxA, eqA = _get_ICxx(x_A, y_A, IC_value=IC_value) # returned in log10(uM)
 
     x_B = np.log10(dataB.conc.values.astype(np.float))
     y_B = dataB.cell_viab.values
-    ICxxB = _get_ICxx(x_B, y_B, IC_value=IC_value) 
+    ICxxB, eqB = _get_ICxx(x_B, y_B, IC_value=IC_value) # returned in log10 (uM)
     
     # Fit 2D (combo) dose-response data
     x = dataAB.conc.values
@@ -80,8 +80,8 @@ def get_CI(dataA, dataB, dataAB, IC_value, margin=0., num_meshgrid_samples=100):
     y_ab = torch.FloatTensor(dataAB.cell_viab.values.astype(np.float))
 
     ComboAB_GP = DrugCombinationGP()
-    ComboAB_GP.fit(x_ab, y_ab, num_steps=2500, plot_loss=False, verbose=False)
-    
+    ComboAB_GP.fit(x_ab, y_ab, num_steps=2500, learning_rate=0.005, plot_loss=False, verbose=False)
+
     log_concs = np.log10( concs.astype(np.float) )
     concA_range = (log_concs[:,0].min()-margin, log_concs[:,0].max()+margin, num_meshgrid_samples)
     concB_range = (log_concs[:,1].min()-margin, log_concs[:,1].max()+margin, num_meshgrid_samples)
@@ -91,20 +91,14 @@ def get_CI(dataA, dataB, dataAB, IC_value, margin=0., num_meshgrid_samples=100):
     Bx = Bv.reshape((-1,))
     Xnew = torch.FloatTensor(np.concatenate((Ax.reshape(-1,1), Bx.reshape(-1,1)), 1))
     comb_samples = np.array( ComboAB_GP.sample(Xnew, n=300) )
-
-    fig = plt.figure(figsize=(10,10))
-    ax = fig.add_subplot(111, projection='3d')
-
     GP_comb_mean = comb_samples.mean(axis=0).reshape(Av.shape)
-    ax.plot_surface(Av, Bv, GP_comb_mean, alpha=0.8)
 
+    idx_ic_comb = np.where((np.abs(GP_comb_mean - IC_value).min(axis=0)))
+    comb = pd.DataFrame({'x':Av[idx_ic_comb].reshape(-1),'y':Bv[idx_ic_comb].reshape(-1),'z':GP_comb_mean[idx_ic_comb].reshape(-1)})
+    comb = comb[lambda x: (x.z < IC_value + allowed_ic_delta) & (x.z > IC_value - allowed_ic_delta)]
     
-    idx_ic_comb = np.where(np.abs(GP_comb_mean - IC_value) == np.abs(GP_comb_mean - IC_value).min(axis=0))
-    x = Av[idx_ic_comb].reshape(-1)
-    y = Bv[idx_ic_comb].reshape(-1)
-    z = GP_comb_mean[idx_ic_comb].reshape(-1)
-    comb = pd.DataFrame({'x':x,'y':y,'z':z})
-    
+    if len(comb) == 0: 
+        return *([None]*7), ICxxA, ICxxB, eqA, eqB
     # isobologram 
     
     x = [10**ICxxA,0]
@@ -140,7 +134,7 @@ def get_CI(dataA, dataB, dataAB, IC_value, margin=0., num_meshgrid_samples=100):
 
     #print(f'This combination is synergistic between: {drugA}:[{min(Ca_range):.5f}-{max(Ca_range):.5f}], {drugB}:[{min(Cb_range):.5f}-{max(Cb_range):.5f}]')
     
-    return min_CI, Ca_min, Cb_min, Ca_range_lower, Ca_range_upper, Cb_range_lower, Cb_range_upper
+    return min_CI, Ca_min, Cb_min, Ca_range_lower, Ca_range_upper, Cb_range_lower, Cb_range_upper, ICxxA, ICxxB, eqA, eqB
     
 
 
@@ -163,13 +157,15 @@ if __name__ == '__main__':
 
     data_all = pd.concat([combo_data, trem13], axis=0)
     
-    res = {x:[] for x in 'lab_id,drugA,drugB,ICxx,min_CI,Ca_min,Cb_min,Ca_range_lower,Ca_range_upper,Cb_range_lower,Cb_range_upper'.split(',')}
+    res = {x:[] for x in 'lab_id,drugA,drugB,ICxx,ICxxA,ICxxB,min_CI,Ca_min,Cb_min,Ca_range_lower,Ca_range_upper,Cb_range_lower,Cb_range_upper,equality_A,equality_B'.split(',')}
     failures = []
     for lab_id in data_all.lab_id.unique():
         print('processing lab_id:', lab_id)
-        
+        if lab_id == 10250: 
+            print('skipping lab_id 10250 (excluded due to batch effects)')
+            continue
+            
         try: 
-
             single_agents = data_all[~data_all.inhibitor.str.contains(';')].inhibitor.unique()
             comb_agents = data_all[data_all.inhibitor.str.contains(';')].inhibitor.unique()
 
@@ -186,7 +182,9 @@ if __name__ == '__main__':
                 #print('dataB shape:', dataB.shape) 
                 #print('dataAB shape:', dataAB.shape)
 
-                min_CI, Ca_min, Cb_min, Ca_range_lower, Ca_range_upper, Cb_range_lower, Cb_range_upper = get_CI(dataA, dataB, dataAB, IC_value=args.ICxx[0])
+                min_CI, Ca_min, Cb_min, Ca_range_lower, Ca_range_upper, Cb_range_lower, Cb_range_upper, ICxxA, ICxxB, eqA, eqB = get_CI(dataA, dataB, dataAB, IC_value=args.ICxx[0])
+                
+                #print(min_CI, Ca_min, Cb_min, Ca_range_lower, Ca_range_upper, Cb_range_lower, Cb_range_upper, ICxxA, ICxxB, eqA, eqB)
 
                 res['lab_id'].append(lab_id)
                 res['drugA'].append(drugA)
@@ -199,8 +197,14 @@ if __name__ == '__main__':
                 res['Cb_range_lower'].append(Cb_range_lower)
                 res['Cb_range_upper'].append(Cb_range_upper)
                 res['ICxx'].append(args.ICxx[0])
+                res['ICxxA'].append(ICxxA)
+                res['ICxxB'].append(ICxxB)
+                res['equality_A'].append(eqA)
+                res['equality_B'].append(eqB)
         except: 
-            failures.append((lab_id, comb)) 
+            failures.append((lab_id, comb) )
+            #raise
+            
     
     res = pd.DataFrame(res) 
     res.to_csv(args.out[0]) 
